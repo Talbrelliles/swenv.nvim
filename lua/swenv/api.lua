@@ -185,32 +185,49 @@ M.set_venv = function(name)
   set_venv(closest_match)
 end
 
-M.auto_venv = function()
-  -- the function tries to activate in-project venvs, if present. Otherwise it tries to activate a venv in venvs folder
-  -- which best matches the project name.
-  local loaded, project_nvim = pcall(require, 'project_nvim.project')
-  local venvs = settings.get_venvs(settings.venvs_path)
-  if not loaded then
-    print('Error: failed to load the project_nvim.project module')
-    return
+local function search_up(dir_or_file)
+  local found = nil
+  local dir_to_check = nil
+  -- get parent directory via vim expand
+  local dir_template = '%:p:h'
+  while not found and dir_to_check ~= '/' do
+    dir_to_check = vim.fn.expand(dir_template)
+    local check_path = dir_to_check .. '/' .. dir_or_file
+    local check_git = dir_to_check .. '/' .. '.git'
+    if vim.fn.filereadable(check_path) == 1 then
+      found = dir_to_check .. '/' .. dir_or_file
+    else
+      dir_template = dir_template .. ':h'
+    end
+    -- If we hit a .git directory then stop searching and return found even if nil
+    if vim.fn.isdirectory(check_git) == 1 then
+      return found
+    end
   end
+  return found
+end
 
-  local project_dir, _ = project_nvim.get_project_root()
-  if project_dir then -- project_nvim.get_project_root might not always return a project path
-    local venv_name = read_venv_name_in_project(project_dir)
-    if venv_name then
-      local venv = { path = get_local_venv_path(project_dir), name = venv_name }
-      set_venv(venv)
-      return
-    end
-    venv_name = read_venv_name_common_dir(project_dir)
-    if venv_name then
-      local venv = best_match(venvs, venv_name)
-      if venv then
-        set_venv(venv)
-        return
+local function get_venv_from_file()
+  local venv_path = search_up('.venv')
+  if venv_path then
+    local venv_file = io.open(venv_path)
+    if venv_file then
+      local current_venv_name = nil
+      if current_venv then
+        current_venv_name = current_venv.name
       end
+      local venv_name = string.gsub(venv_file:read('*a'), '%s+', '')
+      if venv_name ~= current_venv_name and venv_name then
+        M.set_venv(venv_name)
+      end
+      venv_file:close()
     end
+  end
+end
+
+M.auto_venv = function()
+  if settings.auto_create_venv then
+    get_venv_from_file()
   end
 end
 
